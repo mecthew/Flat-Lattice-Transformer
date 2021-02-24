@@ -1,29 +1,8 @@
-import sys
-sys.path.append('../')
 from paths import *
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument('--clip_msra',action='store_true')
+clip_len = 230
+msra_limit_len = 250
+sentence_num = 0
 
-args = parser.parse_args()
-
-lexicon_f = open(yangjie_rich_pretrain_word_path,'r')
-char_f = open(yangjie_rich_pretrain_unigram_path,'r')
-
-output_f = open(yangjie_rich_pretrain_char_and_word_path,'w')
-
-lexicon_lines = lexicon_f.readlines()
-for l in lexicon_lines:
-    l_split = l.strip().split()
-    if len(l_split[0]) != 1:
-        print(l.strip(),file=output_f)
-
-char_lines = char_f.readlines()
-for l in char_lines:
-    print(l.strip(),file=output_f)
-
-clip_len = 230 # msra裁剪的序列大致长度
-msra_limit_len = 250 # 限制的最大序列长
 def create_cliped_file(fp):
     global sentence_num
     f = open(fp,'r',encoding='utf-8')
@@ -90,9 +69,8 @@ def create_cliped_file(fp):
     if check == 0:
         print('没句子超过{}的长度'.format(msra_limit_len))
 
-if args.clip_msra:
-    create_cliped_file('{}/train_dev.char.bmes'.format(msra_ner_cn_path))
-    create_cliped_file('{}/test.char.bmes'.format(msra_ner_cn_path))
-
-
-
+create_cliped_file('{}/msra_train_bio.txt'.format(msra_ner_cn_path))
+print(sentence_num)
+sentence_num = 0
+# create_cliped_file('{}/msra_test_bio.txt'.format(msra_ner_cn_path))
+print(sentence_num)

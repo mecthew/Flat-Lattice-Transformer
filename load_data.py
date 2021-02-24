@@ -124,9 +124,9 @@ def load_resume_ner(path,char_embedding_path=None,bigram_embedding_path=None,ind
     from fastNLP.io.loader import ConllLoader
     from utils import get_bigrams
 
-    train_path = os.path.join(path,'train.char.bmes')
-    dev_path = os.path.join(path,'dev.char.bmes')
-    test_path = os.path.join(path,'test.char.bmes')
+    train_path = os.path.join(path,'resume_train_bmes.txt')
+    dev_path = os.path.join(path,'resume_dev_bmes.txt')
+    test_path = os.path.join(path,'resume_test_bmes')
 
     loader = ConllLoader(['chars','target'])
     train_bundle = loader.load(train_path)
@@ -393,16 +393,80 @@ def load_toy_ner(path,char_embedding_path=None,bigram_embedding_path=None,index_
 
 
 @cache_results(_cache_fp='cache/msraner1',_refresh=False)
-def load_msra_ner_1(path,char_embedding_path=None,bigram_embedding_path=None,index_token=True,train_clip=False,
+def load_msra_ner_without_dev(path,char_embedding_path=None,bigram_embedding_path=None,index_token=True,train_clip=False,
                               char_min_freq=1,bigram_min_freq=1,only_train_min_freq=0):
     from fastNLP.io.loader import ConllLoader
     from utils import get_bigrams
     if train_clip:
-        train_path = os.path.join(path, 'train_dev.char.bmes_clip1')
-        test_path = os.path.join(path, 'test.char.bmes_clip1')
+        train_path = os.path.join(path, 'msra_train_bmes.txt_clip2')
+        test_path = os.path.join(path, 'msra_test_bmes.txt_clip2')
     else:
-        train_path = os.path.join(path,'train_dev.char.bmes')
-        test_path = os.path.join(path,'test.char.bmes')
+        train_path = os.path.join(path,'msra_train_bmes.txt')
+        test_path = os.path.join(path,'msra_test_bmes.txt')
+    loader = ConllLoader(['chars','target'])
+    train_bundle = loader.load(train_path)
+    test_bundle = loader.load(test_path)
+
+
+    datasets = dict()
+    datasets['train'] = train_bundle.datasets['train']
+    datasets['test'] = test_bundle.datasets['train']
+
+
+    datasets['train'].apply_field(get_bigrams,field_name='chars',new_field_name='bigrams')
+    datasets['test'].apply_field(get_bigrams, field_name='chars', new_field_name='bigrams')
+
+    datasets['train'].add_seq_len('chars')
+    datasets['test'].add_seq_len('chars')
+
+
+
+    char_vocab = Vocabulary()
+    bigram_vocab = Vocabulary()
+    label_vocab = Vocabulary()
+    print(datasets.keys())
+    # print(len(datasets['dev']))
+    print(len(datasets['test']))
+    print(len(datasets['train']))
+    char_vocab.from_dataset(datasets['train'],field_name='chars',
+                            no_create_entry_dataset=[datasets['test']] )
+    bigram_vocab.from_dataset(datasets['train'],field_name='bigrams',
+                              no_create_entry_dataset=[datasets['test']])
+    label_vocab.from_dataset(datasets['train'],field_name='target')
+    if index_token:
+        char_vocab.index_dataset(datasets['train'],datasets['test'],
+                                 field_name='chars',new_field_name='chars')
+        bigram_vocab.index_dataset(datasets['train'],datasets['test'],
+                                 field_name='bigrams',new_field_name='bigrams')
+        label_vocab.index_dataset(datasets['train'],datasets['test'],
+                                 field_name='target',new_field_name='target')
+
+    vocabs = {}
+    vocabs['char'] = char_vocab
+    vocabs['label'] = label_vocab
+    vocabs['bigram'] = bigram_vocab
+    vocabs['label'] = label_vocab
+
+    embeddings = {}
+    if char_embedding_path is not None:
+        char_embedding = StaticEmbedding(char_vocab,char_embedding_path,word_dropout=0.01,
+                                         min_freq=char_min_freq,only_train_min_freq=only_train_min_freq)
+        embeddings['char'] = char_embedding
+
+    if bigram_embedding_path is not None:
+        bigram_embedding = StaticEmbedding(bigram_vocab,bigram_embedding_path,word_dropout=0.01,
+                                           min_freq=bigram_min_freq,only_train_min_freq=only_train_min_freq)
+        embeddings['bigram'] = bigram_embedding
+
+    return datasets,vocabs,embeddings
+
+@cache_results(_cache_fp='cache/policyclip200',_refresh=False)
+def load_policy_ner_without_dev(path,char_embedding_path=None,bigram_embedding_path=None,index_token=True,
+                              char_min_freq=1,bigram_min_freq=1,only_train_min_freq=0):
+    from fastNLP.io.loader import ConllLoader
+    from utils import get_bigrams
+    train_path = os.path.join(path,'policy_train_bio_clip200.txt')
+    test_path = os.path.join(path,'policy_test_bio_clip200.txt')
 
     loader = ConllLoader(['chars','target'])
     train_bundle = loader.load(train_path)
@@ -475,9 +539,9 @@ def load_weibo_ner(path,unigram_embedding_path=None,bigram_embedding_path=None,i
 
     # print(datasets['train'][:5])
 
-    train_path = os.path.join(path,'weiboNER_2nd_conll.train_deseg')
-    dev_path = os.path.join(path, 'weiboNER_2nd_conll.dev_deseg')
-    test_path = os.path.join(path, 'weiboNER_2nd_conll.test_deseg')
+    train_path = os.path.join(path, 'train.char.bmes')
+    dev_path = os.path.join(path, 'dev.char.bmes')
+    test_path = os.path.join(path, 'test.char.bmes')
 
     paths = {}
     paths['train'] = train_path
@@ -546,6 +610,7 @@ def load_weibo_ner(path,unigram_embedding_path=None,bigram_embedding_path=None,i
                                            min_freq=bigram_min_freq,only_train_min_freq=only_train_min_freq)
         embeddings['bigram'] = bigram_embedding
 
+    print(f"train: {len(datasets['train'])}; dev: {len(datasets['dev'])}; test: {len(datasets['test'])}")
     return datasets, vocabs, embeddings
 
 
