@@ -1,6 +1,6 @@
 import fitlog
 
-use_fitlog = False
+use_fitlog = True
 if not use_fitlog:
     fitlog.debug()
 fitlog.set_log_dir('logs')
@@ -43,7 +43,8 @@ from V1.models import BERT_SeqLabel
 from fastNLP import DataSetIter
 from fastNLP import SequentialSampler
 from fastNLP.core.utils import _move_dict_value_to_device, _build_args
-from utils import extract_kvpairs_in_bmoes, extract_kvpairs_in_bio
+from utils import extract_kvpairs_in_bmoes, extract_kvpairs_in_bio, set_seed
+
 
 # def warn_with_traceback(message, category, filename, lineno, file=None, line=None):
 #
@@ -52,6 +53,7 @@ from utils import extract_kvpairs_in_bmoes, extract_kvpairs_in_bio
 #     log.write(warnings.formatwarning(message, category, filename, lineno, line))
 # warnings.showwarning = warn_with_traceback
 
+set_seed(100)
 parser = argparse.ArgumentParser()
 # performance inrelevant
 parser.add_argument('--update_every', type=int, default=1)
@@ -159,6 +161,9 @@ parser.add_argument('--abs_pos_fusion_func', default='nonlinear_add',
                     choices=['add', 'concat', 'nonlinear_concat', 'nonlinear_add', 'concat_nonlinear', 'add_nonlinear'])
 
 parser.add_argument('--dataset', default='policy', help='weibo|resume|ontonotes|msra|policy')
+# TODO: add new tag scheme: span-attr_s-attr_e
+parser.add_argument('--new_tag_scheme', action='store_true')
+parser.add_argument('--refresh_data', action='store_true')
 # parser.add_argument('--debug',default=1)
 
 
@@ -177,7 +182,7 @@ if over_all_dropout > 0:
 if args.lattice and args.use_rel_pos:
     args.train_clip = True
 
-# fitlog.commit(__file__,fit_msg='绝对位置用新的了')
+fitlog.commit(__file__, fit_msg='绝对位置用新的了')
 fitlog.set_log_dir('logs')
 now_time = get_peking_time()
 logger.add_file('log/{}'.format(now_time), level='info')
@@ -194,7 +199,6 @@ if args.device != 'cpu':
 else:
     device = torch.device('cpu')
 
-refresh_data = True
 
 for k, v in args.__dict__.items():
     print_info('{}:{}'.format(k, v))
@@ -202,22 +206,22 @@ for k, v in args.__dict__.items():
 # if args.dataset == 'ontonote':
 #     datasets, vocabs, embeddings = load_ontonotes4ner(ontonote4ner_cn_path, yangjie_rich_pretrain_unigram_path,
 #                                                       yangjie_rich_pretrain_bigram_path,
-#                                                       _refresh=refresh_data, index_token=True,
+#                                                       _refresh=args.refresh_data, index_token=True,
 #                                                       )
 # elif args.dataset == 'resume':
 #     datasets, vocabs, embeddings = load_resume_ner(resume_ner_path, yangjie_rich_pretrain_unigram_path,
 #                                                    yangjie_rich_pretrain_bigram_path,
-#                                                    _refresh=refresh_data, index_token=True,
+#                                                    _refresh=args.refresh_data, index_token=True,
 #                                                    )
 # elif args.dataset == 'weibo':
 #     datasets, vocabs, embeddings = load_weibo_ner(weibo_ner_path, yangjie_rich_pretrain_unigram_path,
 #                                                   yangjie_rich_pretrain_bigram_path,
-#                                                   _refresh=refresh_data, index_token=True,
+#                                                   _refresh=args.refresh_data, index_token=True,
 #                                                   )
 # elif args.dataset == 'weibo_old':
 #     datasets, vocabs, embeddings = load_weibo_ner_old(weibo_ner_old_path, yangjie_rich_pretrain_unigram_path,
 #                                                       yangjie_rich_pretrain_bigram_path,
-#                                                       _refresh=refresh_data, index_token=True,
+#                                                       _refresh=args.refresh_data, index_token=True,
 #                                                       )
 
 # print(max(datasets['train']['seq_len']))
@@ -225,8 +229,9 @@ for k, v in args.__dict__.items():
 # print(max(datasets['test']['seq_len']))
 # exit(0)
 
-raw_dataset_cache_name = os.path.join('cache', args.dataset +
-                                      '_trainClip:{}'.format(args.train_clip)
+raw_dataset_cache_name = os.path.join('cache', args.dataset
+                                      + '_newtagscheme{}'.format(args.new_tag_scheme)
+                                      + '_trainClip:{}'.format(args.train_clip)
                                       + 'bgminfreq_{}'.format(args.bigram_min_freq)
                                       + 'char_min_freq_{}'.format(args.char_min_freq)
                                       + 'word_min_freq_{}'.format(args.word_min_freq)
@@ -237,7 +242,7 @@ raw_dataset_cache_name = os.path.join('cache', args.dataset +
 if args.dataset == 'ontonotes':
     datasets, vocabs, embeddings = load_ontonotes4ner(ontonote4ner_cn_path, yangjie_rich_pretrain_unigram_path,
                                                       yangjie_rich_pretrain_bigram_path,
-                                                      _refresh=refresh_data, index_token=False,
+                                                      _refresh=args.refresh_data, index_token=False,
                                                       train_clip=args.train_clip,
                                                       _cache_fp=raw_dataset_cache_name,
                                                       char_min_freq=args.char_min_freq,
@@ -247,7 +252,7 @@ if args.dataset == 'ontonotes':
 elif args.dataset == 'resume':
     datasets, vocabs, embeddings = load_resume_ner(resume_ner_path, yangjie_rich_pretrain_unigram_path,
                                                    yangjie_rich_pretrain_bigram_path,
-                                                   _refresh=refresh_data, index_token=False,
+                                                   _refresh=args.refresh_data, index_token=False,
                                                    _cache_fp=raw_dataset_cache_name,
                                                    char_min_freq=args.char_min_freq,
                                                    bigram_min_freq=args.bigram_min_freq,
@@ -256,7 +261,7 @@ elif args.dataset == 'resume':
 elif args.dataset == 'weibo':
     datasets, vocabs, embeddings = load_weibo_ner(weibo_ner_path, yangjie_rich_pretrain_unigram_path,
                                                   yangjie_rich_pretrain_bigram_path,
-                                                  _refresh=refresh_data, index_token=False,
+                                                  _refresh=args.refresh_data, index_token=False,
                                                   _cache_fp=raw_dataset_cache_name,
                                                   char_min_freq=args.char_min_freq,
                                                   bigram_min_freq=args.bigram_min_freq,
@@ -265,21 +270,21 @@ elif args.dataset == 'weibo':
 elif args.dataset == 'weibo_old':
     datasets, vocabs, embeddings = load_weibo_ner_old(weibo_ner_old_path, yangjie_rich_pretrain_unigram_path,
                                                       yangjie_rich_pretrain_bigram_path,
-                                                      _refresh=refresh_data, index_token=False,
+                                                      _refresh=args.refresh_data, index_token=False,
                                                       _cache_fp=raw_dataset_cache_name
                                                       )
 
 elif args.dataset == 'toy':
     datasets, vocabs, embeddings = load_toy_ner(toy_ner_path, yangjie_rich_pretrain_unigram_path,
                                                 yangjie_rich_pretrain_bigram_path,
-                                                _refresh=refresh_data, index_token=False, train_clip=args.train_clip,
+                                                _refresh=args.refresh_data, index_token=False, train_clip=args.train_clip,
                                                 _cache_fp=raw_dataset_cache_name
                                                 )
 
 elif args.dataset == 'msra':
     datasets, vocabs, embeddings = load_msra_ner_without_dev(msra_ner_cn_path, yangjie_rich_pretrain_unigram_path,
                                                              yangjie_rich_pretrain_bigram_path,
-                                                             _refresh=refresh_data, index_token=False,
+                                                             _refresh=args.refresh_data, index_token=False,
                                                              train_clip=args.train_clip,
                                                              _cache_fp=raw_dataset_cache_name,
                                                              char_min_freq=args.char_min_freq,
@@ -289,7 +294,7 @@ elif args.dataset == 'msra':
 elif args.dataset == 'policy':
     datasets, vocabs, embeddings = load_policy_ner_without_dev(policy_ner_path, yangjie_rich_pretrain_unigram_path,
                                                                yangjie_rich_pretrain_bigram_path,
-                                                               _refresh=refresh_data, index_token=False,
+                                                               _refresh=args.refresh_data, index_token=False,
                                                                _cache_fp=raw_dataset_cache_name,
                                                                char_min_freq=args.char_min_freq,
                                                                bigram_min_freq=args.bigram_min_freq,
@@ -302,7 +307,7 @@ if args.gaz_dropout < 0:
 args.hidden = args.head_dim * args.head
 args.ff = args.hidden * args.ff
 
-# fitlog.add_hyper(args)
+fitlog.add_hyper(args)
 
 
 if args.dataset == 'weibo':
@@ -324,20 +329,20 @@ if args.lexicon_name == 'lk':
 print('用的词表的路径:{}'.format(yangjie_rich_pretrain_word_path))
 
 w_list = load_yangjie_rich_pretrain_word_list(yangjie_rich_pretrain_word_path,
-                                              _refresh=refresh_data,
+                                              _refresh=args.refresh_data,
                                               _cache_fp='cache/{}'.format(args.lexicon_name))
 
 cache_name = os.path.join('cache', (args.dataset + '_lattice' + '_only_train:{}' +
                                     '_trainClip:{}' + '_norm_num:{}'
                                     + 'char_min_freq{}' + 'bigram_min_freq{}' + 'word_min_freq{}' + 'only_train_min_freq{}'
-                                    + 'number_norm{}' + 'lexicon_{}' + 'load_dataset_seed_{}')
+                                    + 'number_norm{}' + 'lexicon_{}' + 'load_dataset_seed_{}' + '_newtagscheme{}')
                           .format(args.only_lexicon_in_train,
                                   args.train_clip, args.number_normalized, args.char_min_freq,
                                   args.bigram_min_freq, args.word_min_freq, args.only_train_min_freq,
-                                  args.number_normalized, args.lexicon_name, load_dataset_seed))
+                                  args.number_normalized, args.lexicon_name, load_dataset_seed, args.new_tag_scheme))
 datasets, vocabs, embeddings = equip_chinese_ner_with_lexicon(datasets, vocabs, embeddings,
                                                               w_list, yangjie_rich_pretrain_word_path,
-                                                              _refresh=refresh_data, _cache_fp=cache_name,
+                                                              _refresh=args.refresh_data, _cache_fp=cache_name,
                                                               only_lexicon_in_train=args.only_lexicon_in_train,
                                                               word_char_mix_embedding_path=yangjie_rich_pretrain_char_and_word_path,
                                                               number_normalized=args.number_normalized,
@@ -432,7 +437,7 @@ for k, v in datasets.items():
 # max_seq_len = max(max(datasets['train']['seq_len']),max(datasets['dev']['seq_len']),max(datasets['test']['seq_len']))
 max_seq_len = max(*map(lambda x: max(x['seq_len']), datasets.values()))
 
-show_index = 4
+show_index = 3
 print('raw_chars:{}'.format(list(datasets['train'][show_index]['raw_chars'])))
 print('lexicons:{}'.format(list(datasets['train'][show_index]['lexicons'])))
 print('lattice:{}'.format(list(datasets['train'][show_index]['lattice'])))
@@ -442,7 +447,9 @@ print('lex_s:{}'.format(list(datasets['train'][show_index]['lex_s'])))
 print('lex_e:{}'.format(list(datasets['train'][show_index]['lex_e'])))
 print('pos_s:{}'.format(list(datasets['train'][show_index]['pos_s'])))
 print('pos_e:{}'.format(list(datasets['train'][show_index]['pos_e'])))
-
+print('span_label:{}'.format(list(datasets['train'][show_index]['span_label'])))
+print('attr_start_label:{}'.format(list(datasets['train'][show_index]['attr_start_label'])))
+print('attr_end_label:{}'.format(list(datasets['train'][show_index]['attr_end_label'])))
 # exit(1208)
 
 for k, v in datasets.items():
@@ -452,9 +459,10 @@ for k, v in datasets.items():
     # v.set_input('chars_target')
     # v.set_target('chars_target')
     if args.lattice:
-        v.set_input('lattice', 'bigrams', 'seq_len', 'target')
+        v.set_input('lattice', 'bigrams', 'seq_len', 'target', 'span_label', 'attr_start_label', 'attr_end_label')
         v.set_input('lex_num', 'pos_s', 'pos_e')
         v.set_target('target', 'seq_len')
+        v.set_target('span_label', 'attr_start_label', 'attr_end_label')
         v.set_pad_val('lattice', vocabs['lattice'].padding_idx)
     else:
         v.set_input('chars', 'bigrams', 'seq_len', 'target')
@@ -542,7 +550,8 @@ if args.model == 'transformer':
                                                  four_pos_shared=args.four_pos_shared,
                                                  four_pos_fusion=args.four_pos_fusion,
                                                  four_pos_fusion_shared=args.four_pos_fusion_shared,
-                                                 bert_embedding=bert_embedding
+                                                 bert_embedding=bert_embedding,
+                                                 new_tag_scheme=args.new_tag_scheme,
                                                  )
     else:
         model = Transformer_SeqLabel(embeddings['lattice'], embeddings['bigram'], args.hidden, len(vocabs['label']),
@@ -767,13 +776,11 @@ class record_best_test_callback(Callback):
         print(eval_result['data_test']['SpanFPreRecMetric']['f'])
 
 
-print(torch.rand(size=[3, 3], device=device))
-
 # if args.debug:
 #     datasets['train'] = datasets['train'][:200]
 
 
-def get_predictions(pred_model, input_data, batch_size, num_workers=4):
+def get_predictions(pred_model, input_data, batch_size, new_tag_scheme, num_workers=4):
     texts = list(list(map(lambda x: vocabs['char'].to_word(x), sample['chars'])) for sample in input_data)
     seq_lens = [sample['seq_len'] for sample in input_data]
     pred_model.to(device)
@@ -787,7 +794,8 @@ def get_predictions(pred_model, input_data, batch_size, num_workers=4):
         for batch_x, batch_y in data_iterator:
             _move_dict_value_to_device(batch_x, batch_y, device=device)
             x = _build_args(pred_model.forward, **batch_x)
-            y = pred_model.forward(**x)
+            with torch.no_grad():
+                y = pred_model.forward(**x)
             preds.extend(list(map(list, y['pred'].cpu().numpy())))
             golds.extend(list(map(list, batch_y['target'].cpu().numpy())))
     pred_seqs = list(list(map(lambda _y: vocabs['label'].to_word(_y), pred)) for pred in preds)

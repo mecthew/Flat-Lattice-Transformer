@@ -204,6 +204,12 @@ def equip_chinese_ner_with_lexicon(datasets,vocabs,embeddings,w_list,word_embedd
                               field_name='target', new_field_name='target')
     vocabs['lattice'].index_dataset(* (datasets.values()),
                                     field_name='lattice', new_field_name='lattice')
+    vocabs['span_label'].index_dataset(*(datasets.values()),
+                                       field_name='span_label', new_field_name='span_label')
+    vocabs['attr_label'].index_dataset(*(datasets.values()),
+                                       field_name='attr_start_label', new_field_name='attr_start_label')
+    vocabs['attr_label'].index_dataset(*(datasets.values()),
+                                       field_name='attr_end_label', new_field_name='attr_end_label')
 
 
     return datasets,vocabs,embeddings

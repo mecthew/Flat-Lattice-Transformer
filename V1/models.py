@@ -13,6 +13,9 @@ import math
 import copy
 from utils import size2MB
 from utils import MyDropout
+from input_with_span_attr import ATTR_NULL_TAG, convert_attr_seq_to_ner_seq
+from V1.ple import PLE
+
 
 def get_embedding(max_seq_len, embedding_dim, padding_idx=None, rel_pos_init=0):
     """Build sinusoidal embeddings.
@@ -233,7 +236,8 @@ class Lattice_Transformer_SeqLabel(nn.Module):
                  rel_pos_shared=True,max_seq_len=-1,k_proj=True,q_proj=True,v_proj=True,r_proj=True,
                  self_supervised=False,attn_ff=True,pos_norm=False,ff_activate='relu',rel_pos_init=0,
                  abs_pos_fusion_func='concat',embed_dropout_pos='0',
-                 four_pos_shared=True,four_pos_fusion=None,four_pos_fusion_shared=True,bert_embedding=None):
+                 four_pos_shared=True,four_pos_fusion=None,four_pos_fusion_shared=True,bert_embedding=None,
+                 new_tag_scheme=False):
         '''
         :param rel_pos_init: 如果是0，那么从-max_len到max_len的相对位置编码矩阵就按0-2*max_len来初始化，
         如果是1，那么就按-max_len,max_len来初始化
@@ -396,23 +400,41 @@ class Lattice_Transformer_SeqLabel(nn.Module):
 
         self.output_dropout = MyDropout(self.dropout['output'])
 
-        self.output = nn.Linear(self.hidden_size,self.label_size)
+        self.output = nn.Linear(self.hidden_size, self.label_size)
         if self.self_supervised:
             self.output_self_supervised = nn.Linear(self.hidden_size,len(vocabs['char']))
             print('self.output_self_supervised:{}'.format(self.output_self_supervised.weight.size()))
-        self.crf = get_crf_zero_init(self.label_size)
-        self.loss_func = nn.CrossEntropyLoss(ignore_index=-100)
+
+        self.span_label_size = len(vocabs['span_label'])
+        self.attr_label_size = len(vocabs['attr_label'])
+        self.new_tag_scheme = new_tag_scheme
+
+        if self.new_tag_scheme:
+            self.crf = get_crf_zero_init(self.span_label_size)
+            weight = torch.FloatTensor([1.0 if vocabs['attr_label'].to_word(i) != ATTR_NULL_TAG else 0.1
+                                        for i in range(self.attr_label_size)])
+            self.attr_criterion = nn.CrossEntropyLoss(reduction='none', weight=weight)
+            self.ple = PLE(hidden_size=hidden_size, span_label_size=self.span_label_size,
+                        attr_label_size=self.attr_label_size, dropout_rate=0.3, experts_layers=2, experts_num=2)
+        else:
+            self.crf = get_crf_zero_init(self.label_size)
+            self.loss_func = nn.CrossEntropyLoss(ignore_index=-100)
+
 
 
     def forward(self, lattice, bigrams, seq_len, lex_num, pos_s, pos_e,
-                target, chars_target=None):
+                target, span_label, attr_start_label, attr_end_label, chars_target=None):
         if self.mode['debug']:
-            print('lattice:{}'.format(lattice))
-            print('bigrams:{}'.format(bigrams))
-            print('seq_len:{}'.format(seq_len))
-            print('lex_num:{}'.format(lex_num))
-            print('pos_s:{}'.format(pos_s))
-            print('pos_e:{}'.format(pos_e))
+            print('lattice:{} {}'.format(lattice.shape, lattice))
+            print('bigrams:{} {}'.format(bigrams.shape, bigrams))
+            print('seq_len:{} {}'.format(seq_len.shape, seq_len))
+            print('lex_num:{} {}'.format(lex_num.shape, lex_num))
+            print('pos_s:{} {}'.format(pos_s.shape, pos_s))
+            print('pos_e:{} {}'.format(pos_e.shape, pos_e))
+            print('span_label:{} {}'.format(span_label.shape, span_label))
+            print('attr_start_label:{} {}'.format(attr_start_label.shape, attr_start_label))
+            print('attr_end_label: {} {}'.format(attr_end_label.shape, attr_end_label))
+            exit(1228)
 
         batch_size = lattice.size(0)
         max_seq_len_and_lex_num = lattice.size(1)
@@ -504,35 +526,51 @@ class Lattice_Transformer_SeqLabel(nn.Module):
         if hasattr(self,'output_dropout'):
             encoded = self.output_dropout(encoded)
 
-
         encoded = encoded[:,:max_seq_len,:]
-        pred = self.output(encoded)
-
         mask = seq_len_to_mask(seq_len).bool()
-
-        if self.mode['debug']:
-            print('debug mode:finish!')
-            exit(1208)
-        if self.training:
-            loss = self.crf(pred, target, mask).mean(dim=0)
-            if self.self_supervised:
-                # print('self supervised loss added!')
-                chars_pred = self.output_self_supervised(encoded)
-                chars_pred = chars_pred.view(size=[batch_size*max_seq_len,-1])
-                chars_target = chars_target.view(size=[batch_size*max_seq_len])
-                self_supervised_loss = self.loss_func(chars_pred,chars_target)
-                # print('self_supervised_loss:{}'.format(self_supervised_loss))
-                # print('supervised_loss:{}'.format(loss))
-                loss += self_supervised_loss
-            return {'loss': loss}
+        # TODO: add ours PLE
+        if self.new_tag_scheme:
+            span_logits, attr_start_logits, attr_end_logits = self.ple(encoded, encoded, encoded)
+            if self.training:
+                inputs_seq_len = mask.sum(dim=-1).float()
+                span_loss = self.crf(span_logits, span_label, mask)
+                attr_start_loss = self.attr_criterion(attr_start_logits.permute(0, 2, 1), attr_start_label)  # B * S
+                attr_start_loss = torch.sum(attr_start_loss * mask.float(), dim=-1).float() / inputs_seq_len  # B
+                attr_end_loss = self.attr_criterion(attr_end_logits.permute(0, 2, 1), attr_end_label)  # B * S
+                attr_end_loss = torch.sum(attr_end_loss * mask.float(), dim=-1).float() / inputs_seq_len  # B
+                loss = (span_loss + attr_start_loss + attr_end_loss) / 3
+                return {"loss": loss}
+            else:
+                span_pred, path = self.crf.viterbi_decode(span_logits, mask)
+                attr_start_pred = attr_start_logits.argmax(dim=-1)
+                attr_end_pred = attr_end_logits.argmax(dim=-1)
+                ner_pred = convert_attr_seq_to_ner_seq(attr_start_pred, attr_end_pred, self.vocabs, tagscheme='BMOES')
+                return {'pred': ner_pred}
         else:
-            pred, path = self.crf.viterbi_decode(pred, mask)
-            result = {'pred': pred}
-            if self.self_supervised:
-                chars_pred = self.output_self_supervised(encoded)
-                result['chars_pred'] = chars_pred
+            pred = self.output(encoded)
+            if self.mode['debug']:
+                print('debug mode:finish!')
+                exit(1208)
+            if self.training:
+                loss = self.crf(pred, target, mask).mean(dim=0)
+                if self.self_supervised:
+                    # print('self supervised loss added!')
+                    chars_pred = self.output_self_supervised(encoded)
+                    chars_pred = chars_pred.view(size=[batch_size*max_seq_len,-1])
+                    chars_target = chars_target.view(size=[batch_size*max_seq_len])
+                    self_supervised_loss = self.loss_func(chars_pred,chars_target)
+                    # print('self_supervised_loss:{}'.format(self_supervised_loss))
+                    # print('supervised_loss:{}'.format(loss))
+                    loss += self_supervised_loss
+                return {'loss': loss}
+            else:
+                pred, path = self.crf.viterbi_decode(pred, mask)
+                result = {'pred': pred}
+                if self.self_supervised:
+                    chars_pred = self.output_self_supervised(encoded)
+                    result['chars_pred'] = chars_pred
 
-            return result
+                return result
 
 
     # def train(self,mode=True):
@@ -584,11 +622,6 @@ class BERT_SeqLabel(nn.Module):
             result = {'pred': pred}
 
             return result
-
-
-
-
-
 
 
 class Transformer_SeqLabel(nn.Module):
@@ -719,6 +752,7 @@ class Transformer_SeqLabel(nn.Module):
             print('self.output_self_supervised:{}'.format(self.output_self_supervised.weight.size()))
         self.crf = get_crf_zero_init(self.label_size)
         self.loss_func = nn.CrossEntropyLoss(ignore_index=-100)
+
     def forward(self, chars, bigrams, seq_len, target, chars_target=None):
         # print('**self.training: {} **'.format(self.training))
         batch_size = chars.size(0)

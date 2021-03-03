@@ -4,6 +4,9 @@ python flat_main.py \
     --after_bert mlp \
     --lexicon_name yj \
     --batch 10 \
+    --epoch 100 \
     --optim sgd \
     --dataset $2 \
-    --status $3
+    --status $3 \
+    --new_tag_scheme \
+    $4
