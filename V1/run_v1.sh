@@ -1,6 +1,6 @@
 CUDA_VISIBLE_DEVICES=$1 \
 python flat_main.py \
-    --use_bert 0 \
+    --use_bert 1 \
     --after_bert mlp \
     --lexicon_name yj \
     --lr 1e-2 \
