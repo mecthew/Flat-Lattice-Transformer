@@ -822,7 +822,7 @@ def get_predictions(pred_model, input_data, batch_size, num_workers=4):
 
 
 
-ckpt_path = f'./ckpt/model_{args.dataset}_bert{args.use_bert}.ckpt'
+ckpt_path = f'./ckpt/model_{args.dataset}_bert{args.use_bert}_ple{args.ple_channel_num}.ckpt'
 if args.status == 'train':
     trainer = Trainer(datasets['train'], model, optimizer, loss, args.batch,
                       n_epochs=args.epoch,
@@ -840,7 +840,7 @@ elif args.status == 'test':
     if args.loadmodel_path:
         ckpt_path = args.loadmodel_path
     else:
-        prefix = f'model_{args.dataset}_bert{args.use_bert}'
+        prefix = ckpt_path.rsplit('/', maxsplit=1)[-1].split('.')[0]
         fscores = []
         for file in os.listdir(ckpt_path.rsplit('/', maxsplit=1)[0]):
             if file.endswith('.ckpt') and re.match(prefix + '_f(\d+\.?\d+)', file):
