@@ -1,3 +1,5 @@
+import re
+
 import fitlog
 
 use_fitlog = True
@@ -164,6 +166,9 @@ parser.add_argument('--dataset', default='policy', help='weibo|resume|ontonotes|
 # TODO: add new tag scheme: span-attr_s-attr_e
 parser.add_argument('--new_tag_scheme', action='store_true')
 parser.add_argument('--refresh_data', action='store_true')
+parser.add_argument('--loadmodel_path', default='')
+parser.add_argument('--span_loass_alpha', default=0.1, type=float)
+parser.add_argument('--ple_channel_num', default=2, type=int)
 # parser.add_argument('--debug',default=1)
 
 
@@ -552,6 +557,8 @@ if args.model == 'transformer':
                                                  four_pos_fusion_shared=args.four_pos_fusion_shared,
                                                  bert_embedding=bert_embedding,
                                                  new_tag_scheme=args.new_tag_scheme,
+                                                 span_loss_alpha=args.span_loass_alpha,
+                                                 ple_channel_num=args.ple_channel_num
                                                  )
     else:
         model = Transformer_SeqLabel(embeddings['lattice'], embeddings['bigram'], args.hidden, len(vocabs['label']),
@@ -780,7 +787,7 @@ class record_best_test_callback(Callback):
 #     datasets['train'] = datasets['train'][:200]
 
 
-def get_predictions(pred_model, input_data, batch_size, new_tag_scheme, num_workers=4):
+def get_predictions(pred_model, input_data, batch_size, num_workers=4):
     texts = list(list(map(lambda x: vocabs['char'].to_word(x), sample['chars'])) for sample in input_data)
     seq_lens = [sample['seq_len'] for sample in input_data]
     pred_model.to(device)
@@ -826,9 +833,21 @@ if args.status == 'train':
                       update_every=args.update_every)
 
     os.makedirs("./ckpt", exist_ok=True)
-    trainer.train()
-    torch.save(model.state_dict(), ckpt_path)
+    result = trainer.train()
+    dev_f = result['best_eval']['SpanFPreRecMetric']['f']
+    torch.save(model.state_dict(), ckpt_path.replace('.ckpt', '_f{}.ckpt'.format(dev_f)))
 elif args.status == 'test':
+    if args.loadmodel_path:
+        ckpt_path = args.loadmodel_path
+    else:
+        prefix = f'model_{args.dataset}_bert{args.use_bert}'
+        fscores = []
+        for file in os.listdir(ckpt_path.rsplit('/', maxsplit=1)[0]):
+            if file.endswith('.ckpt') and re.match(prefix + '_f(\d+\.?\d+)', file):
+                fscores.append(float(re.findall(prefix + '_f(\d+\.?\d+)', file)[0]))
+        max_score = max(fscores)
+        ckpt_path = ckpt_path.replace('.ckpt', f"_f{max_score}.ckpt")
+
     model.load_state_dict(torch.load(ckpt_path))
     tester = Tester(data=datasets['test'], model=model,
                     metrics=metrics,

@@ -15,6 +15,7 @@ from utils import size2MB
 from utils import MyDropout
 from input_with_span_attr import ATTR_NULL_TAG, convert_attr_seq_to_ner_seq
 from V1.ple import PLE
+from utils import clones
 
 
 def get_embedding(max_seq_len, embedding_dim, padding_idx=None, rel_pos_init=0):
@@ -237,7 +238,7 @@ class Lattice_Transformer_SeqLabel(nn.Module):
                  self_supervised=False,attn_ff=True,pos_norm=False,ff_activate='relu',rel_pos_init=0,
                  abs_pos_fusion_func='concat',embed_dropout_pos='0',
                  four_pos_shared=True,four_pos_fusion=None,four_pos_fusion_shared=True,bert_embedding=None,
-                 new_tag_scheme=False):
+                 new_tag_scheme=False, span_loss_alpha=1.0, ple_channel_num=2):
         '''
         :param rel_pos_init: 如果是0，那么从-max_len到max_len的相对位置编码矩阵就按0-2*max_len来初始化，
         如果是1，那么就按-max_len,max_len来初始化
@@ -398,6 +399,7 @@ class Lattice_Transformer_SeqLabel(nn.Module):
                                            four_pos_fusion=self.four_pos_fusion,
                                            four_pos_fusion_shared=self.four_pos_fusion_shared)
 
+
         self.output_dropout = MyDropout(self.dropout['output'])
 
         self.output = nn.Linear(self.hidden_size, self.label_size)
@@ -416,6 +418,9 @@ class Lattice_Transformer_SeqLabel(nn.Module):
             self.attr_criterion = nn.CrossEntropyLoss(reduction='none', weight=weight)
             self.ple = PLE(hidden_size=hidden_size, span_label_size=self.span_label_size,
                         attr_label_size=self.attr_label_size, dropout_rate=0.3, experts_layers=2, experts_num=2)
+            self.span_loss_alpha = span_loss_alpha
+            self.ple_channel_num = ple_channel_num
+            self.encoder_list = clones(self.encoder, self.ple_channel_num)
         else:
             self.crf = get_crf_zero_init(self.label_size)
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-100)
@@ -521,16 +526,22 @@ class Lattice_Transformer_SeqLabel(nn.Module):
         # print(embedding.size())
         # print('merged_embedding:{}'.format(embedding[:1,:3,:4]))
         # exit()
-        encoded = self.encoder(embedding,seq_len,lex_num=lex_num,pos_s=pos_s,pos_e=pos_e)
 
-        if hasattr(self,'output_dropout'):
-            encoded = self.output_dropout(encoded)
-
-        encoded = encoded[:,:max_seq_len,:]
         mask = seq_len_to_mask(seq_len).bool()
         # TODO: add ours PLE
         if self.new_tag_scheme:
-            span_logits, attr_start_logits, attr_end_logits = self.ple(encoded, encoded, encoded)
+            encodeds = []
+            for _i in range(self.ple_channel_num):
+                encoded = self.encoder_list[_i](embedding, seq_len, lex_num=lex_num, pos_s=pos_s, pos_e=pos_e)
+                if hasattr(self, 'output_dropout'):
+                    encoded = self.output_dropout(encoded)
+                encoded = encoded[:, :max_seq_len, :]
+                encodeds.append(encoded)
+            if self.ple_channel_num == 1:
+                encodeds = encodeds * 3
+            elif self.ple_channel_num == 2:
+                encodeds = encodeds + [encodeds[-1]]
+            span_logits, attr_start_logits, attr_end_logits = self.ple(encodeds[0], encodeds[1], encodeds[2])
             if self.training:
                 inputs_seq_len = mask.sum(dim=-1).float()
                 span_loss = self.crf(span_logits, span_label, mask)
@@ -538,7 +549,7 @@ class Lattice_Transformer_SeqLabel(nn.Module):
                 attr_start_loss = torch.sum(attr_start_loss * mask.float(), dim=-1).float() / inputs_seq_len  # B
                 attr_end_loss = self.attr_criterion(attr_end_logits.permute(0, 2, 1), attr_end_label)  # B * S
                 attr_end_loss = torch.sum(attr_end_loss * mask.float(), dim=-1).float() / inputs_seq_len  # B
-                loss = (span_loss + attr_start_loss + attr_end_loss) / 3
+                loss = (self.span_loss_alpha * span_loss + attr_start_loss + attr_end_loss) / 3
                 return {"loss": loss}
             else:
                 span_pred, path = self.crf.viterbi_decode(span_logits, mask)
@@ -547,6 +558,10 @@ class Lattice_Transformer_SeqLabel(nn.Module):
                 ner_pred = convert_attr_seq_to_ner_seq(attr_start_pred, attr_end_pred, self.vocabs, tagscheme='BMOES')
                 return {'pred': ner_pred}
         else:
+            encoded = self.encoder(embedding, seq_len, lex_num=lex_num, pos_s=pos_s, pos_e=pos_e)
+            if hasattr(self, 'output_dropout'):
+                encoded = self.output_dropout(encoded)
+            encoded = encoded[:, :max_seq_len, :]
             pred = self.output(encoded)
             if self.mode['debug']:
                 print('debug mode:finish!')

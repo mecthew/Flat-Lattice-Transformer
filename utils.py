@@ -1,3 +1,5 @@
+import copy
+
 import torch.nn.functional as F
 import torch
 import random
@@ -9,6 +11,10 @@ from fastNLP import Tester
 import os
 from fastNLP import logger
 import torch.nn as nn
+import torch
+
+def clones(module, N):
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
 class MyDropout(nn.Module):
     def __init__(self, p):
