@@ -46,6 +46,7 @@ from fastNLP import DataSetIter
 from fastNLP import SequentialSampler
 from fastNLP.core.utils import _move_dict_value_to_device, _build_args
 from utils import extract_kvpairs_in_bmoes, extract_kvpairs_in_bio, set_seed
+import datetime
 
 
 # def warn_with_traceback(message, category, filename, lineno, file=None, line=None):
@@ -65,13 +66,13 @@ parser.add_argument('--only_bert', type=int, default=0)
 parser.add_argument('--fix_bert_epoch', type=int, default=20)
 parser.add_argument('--after_bert', default='mlp', choices=['lstm', 'mlp'])
 parser.add_argument('--msg', default='11266')
-parser.add_argument('--train_clip', default=False, help='是不是要把train的char长度限制在200以内')
+parser.add_argument('--train_clip', default=True, help='是不是要把train的char长度限制在200以内')
 parser.add_argument('--device', default='0')
 parser.add_argument('--debug', default=0, type=int)
 parser.add_argument('--gpumm', default=False, help='查看显存')
 parser.add_argument('--see_convergence', default=False)
 parser.add_argument('--see_param', default=False)
-parser.add_argument('--test_batch', default=-1)
+parser.add_argument('--test_batch', default=16)
 parser.add_argument('--seed', default=1080956, type=int)
 parser.add_argument('--test_train', default=False)
 parser.add_argument('--number_normalized', type=int, default=0,
@@ -164,15 +165,22 @@ parser.add_argument('--abs_pos_fusion_func', default='nonlinear_add',
 
 parser.add_argument('--dataset', default='policy', help='weibo|resume|ontonotes|msra|policy')
 # TODO: add new tag scheme: span-attr_s-attr_e
-parser.add_argument('--new_tag_scheme', action='store_true')
+parser.add_argument('--new_tag_scheme', type=int, default=1)
 parser.add_argument('--refresh_data', action='store_true')
 parser.add_argument('--loadmodel_path', default='')
 parser.add_argument('--span_loass_alpha', default=0.1, type=float)
-parser.add_argument('--ple_channel_num', default=2, type=int)
+parser.add_argument('--ple_channel_num', default=1, type=int, choices=[1, 3])
+parser.add_argument('--use_ple_lstm', action='store_true')
 # parser.add_argument('--debug',default=1)
 
-
 args = parser.parse_args()
+# log_dir = f'../output/logs/{args.dataset}/bert{args.use_bert}_tagscheme{args.new_tag_scheme}_ple'
+# os.makedirs(log_dir, exist_ok=True)
+# file_logger = get_logger(sys.argv, log_dir + '/{}.log'.format(datetime.datetime.now().strftime('%y-%m-%d-%H-%M-%S')))
+# file_logger.info('Arguments:')
+# for arg in vars(args):
+#     file_logger.info('{}: {}'.format(arg, getattr(args, arg)))
+
 if args.ff_dropout_2 < 0:
     args.ff_dropout_2 = args.ff_dropout
 
@@ -190,9 +198,15 @@ if args.lattice and args.use_rel_pos:
 fitlog.commit(__file__, fit_msg='绝对位置用新的了')
 fitlog.set_log_dir('logs')
 now_time = get_peking_time()
-logger.add_file('log/{}'.format(now_time), level='info')
+logger.add_file(f'log/{args.dataset}/bert{args.use_bert}_tagscheme{args.new_tag_scheme}_ple{args.ple_channel_num}_plstm{int(args.use_ple_lstm)}/{now_time}.log', level='info')
+logger.info('Arguments')
+for arg in vars(args):
+    logger.info("{}: {}".format(arg, getattr(args, arg)))
+
 if args.test_batch == -1:
     args.test_batch = args.batch // 2
+else:
+    args.test_batch = args.batch
 fitlog.add_hyper(now_time, 'time')
 if args.debug:
     # args.dataset = 'toy'
@@ -244,7 +258,7 @@ raw_dataset_cache_name = os.path.join('cache', args.dataset
                                       + 'number_norm{}'.format(args.number_normalized)
                                       + 'load_dataset_seed{}'.format(load_dataset_seed))
 
-if args.dataset == 'ontonotes':
+if args.dataset == 'ontonotes4':
     datasets, vocabs, embeddings = load_ontonotes4ner(ontonote4ner_cn_path, yangjie_rich_pretrain_unigram_path,
                                                       yangjie_rich_pretrain_bigram_path,
                                                       _refresh=args.refresh_data, index_token=False,
@@ -332,6 +346,7 @@ if args.lexicon_name == 'lk':
     yangjie_rich_pretrain_word_path = lk_word_path_2
 
 print('用的词表的路径:{}'.format(yangjie_rich_pretrain_word_path))
+logger.info('用的词表的路径:{}'.format(yangjie_rich_pretrain_word_path))
 
 w_list = load_yangjie_rich_pretrain_word_list(yangjie_rich_pretrain_word_path,
                                               _refresh=args.refresh_data,
@@ -355,6 +370,7 @@ datasets, vocabs, embeddings = equip_chinese_ner_with_lexicon(datasets, vocabs, 
                                                               only_train_min_freq=args.only_train_min_freq)
 
 print('train:{}'.format(len(datasets['train'])))
+logger.info('train:{}'.format(len(datasets['train'])))
 avg_seq_len = 0
 avg_lex_num = 0
 avg_seq_lex = 0
@@ -558,7 +574,8 @@ if args.model == 'transformer':
                                                  bert_embedding=bert_embedding,
                                                  new_tag_scheme=args.new_tag_scheme,
                                                  span_loss_alpha=args.span_loass_alpha,
-                                                 ple_channel_num=args.ple_channel_num
+                                                 ple_channel_num=args.ple_channel_num,
+                                                 use_ple_lstm=args.use_ple_lstm
                                                  )
     else:
         model = Transformer_SeqLabel(embeddings['lattice'], embeddings['bigram'], args.hidden, len(vocabs['label']),
@@ -590,6 +607,7 @@ elif args.model == 'lstm':
 
 for n, p in model.named_parameters():
     print('{}:{}'.format(n, p.size()))
+    logger.info('{}:{}'.format(n, p.size()))
 
 # exit(1208)
 
@@ -815,40 +833,57 @@ def get_predictions(pred_model, input_data, batch_size, num_workers=4):
                            extract_kvpairs_in_bio(pred_seq, word_seq)))
 
     # output for case study
-    os.makedirs('./preds', exist_ok=True)
-    fout = open(f'./preds/{args.dataset}_bert{args.use_bert}.casestudy', 'w', encoding='utf8')
+    os.makedirs(f'../output/case_study/{args.dataset}', exist_ok=True)
+    fout = open(f'../output/case_study/{args.dataset}/bert{args.use_bert}_scheme{args.new_tag_scheme}_ple{args.ple_channel_num}_plstm{int(args.use_ple_lstm)}.casestudy', 'w', encoding='utf8')
     for word_seq, gold_pair, pred_pair in case_result:
         fout.write(word_seq + '\n' + str(gold_pair) + '\n' + str(pred_pair) + '\n\n')
 
 
-
-ckpt_path = f'./ckpt/model_{args.dataset}_bert{args.use_bert}_ple{args.ple_channel_num}.ckpt'
+ckpt_path = f'../output/ckpt/{args.dataset}/bert{args.use_bert}_scheme{args.new_tag_scheme}_ple{args.ple_channel_num}_plstm{int(args.use_ple_lstm)}'
 if args.status == 'train':
+    if args.dataset == 'msra':
+        dev_data = datasets['test']
+    else:
+        dev_data = datasets['dev']
     trainer = Trainer(datasets['train'], model, optimizer, loss, args.batch,
                       n_epochs=args.epoch,
-                      dev_data=datasets['dev'],
+                      dev_data=dev_data,
                       metrics=metrics,
                       device=device, callbacks=callbacks, dev_batch_size=args.test_batch,
                       test_use_tqdm=False, check_code_level=-1,
-                      update_every=args.update_every)
+                      update_every=args.update_every,
+                      save_path=ckpt_path)
 
-    os.makedirs("./ckpt", exist_ok=True)
+    os.makedirs("../output/ckpt", exist_ok=True)
     result = trainer.train()
-    dev_f = result['best_eval']['SpanFPreRecMetric']['f']
-    torch.save(model.state_dict(), ckpt_path.replace('.ckpt', '_f{}.ckpt'.format(dev_f)))
-elif args.status == 'test':
+    # dev_f = result['best_eval']['SpanFPreRecMetric']['f']
+    # file_logger.info(f"Dev resule F1: {dev_f}")
+    # torch.save(model.state_dict(), ckpt_path.replace('.ckpt', '_f{}.ckpt'.format(dev_f)))
+# elif args.status == 'test':
+
+if args.dataset != 'msra':
     if args.loadmodel_path:
         ckpt_path = args.loadmodel_path
     else:
-        prefix = ckpt_path.rsplit('/', maxsplit=1)[-1].split('.')[0]
-        fscores = []
-        for file in os.listdir(ckpt_path.rsplit('/', maxsplit=1)[0]):
-            if file.endswith('.ckpt') and re.match(prefix + '_f(\d+\.?\d+)', file):
-                fscores.append(float(re.findall(prefix + '_f(\d+\.?\d+)', file)[0]))
-        max_score = max(fscores)
-        ckpt_path = ckpt_path.replace('.ckpt', f"_f{max_score}.ckpt")
+        # prefix = ckpt_path.rsplit('/', maxsplit=1)[-1].split('.')[0]
+        # print(f"Be attention to prefix {prefix} !")
+        # fscores = []
+        # for file in os.listdir(ckpt_path.rsplit('/', maxsplit=1)[0]):
+        #     if file.endswith('.ckpt') and re.match(prefix + '_f(\d+\.?\d+)', file):
+        #         fscores.append(float(re.findall(prefix + '_f(\d+\.?\d+)', file)[0]))
+        # max_score = max(fscores)
+        # ckpt_path = ckpt_path.replace('.ckpt', f"_f{max_score}.ckpt")
+        last_ckpt = os.listdir(ckpt_path)[-1]
+        ckpt_path = os.path.join(ckpt_path, last_ckpt)
+        # print(last_ckpt)
 
-    model.load_state_dict(torch.load(ckpt_path))
+        print(f"Find default best dev ckpt: {ckpt_path}")
+        logger.info(f"Find default best dev ckpt: {ckpt_path}")
+
+    # model.load_state_dict(torch.load(ckpt_path))
+    del model
+    torch.cuda.empty_cache()
+    model = torch.load(ckpt_path)
     tester = Tester(data=datasets['test'], model=model,
                     metrics=metrics,
                     device=device,

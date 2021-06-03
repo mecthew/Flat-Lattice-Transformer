@@ -84,9 +84,9 @@ def load_resume_ner(path, char_embedding_path=None, bigram_embedding_path=None, 
     from fastNLP.io.loader import ConllLoader
     from utils import get_bigrams
 
-    train_path = os.path.join(path, 'resume_train_bmes.txt')
-    dev_path = os.path.join(path, 'resume_dev_bmes.txt')
-    test_path = os.path.join(path, 'resume_test_bmes.txt')
+    train_path = os.path.join(path, 'train.char.bmoes')
+    dev_path = os.path.join(path, 'dev.char.bmoes')
+    test_path = os.path.join(path, 'test.char.bmoes')
 
     loader = ConllLoader(['chars', 'target'])
     train_bundle = loader.load(train_path)
@@ -274,9 +274,9 @@ def load_toy_ner(path, char_embedding_path=None, bigram_embedding_path=None, ind
     from fastNLP.io.loader import ConllLoader
     from utils import get_bigrams
 
-    train_path = os.path.join(path, 'toy_train.bmes')
-    dev_path = os.path.join(path, 'toy_dev.bmes')
-    test_path = os.path.join(path, 'toy_test.bmes')
+    train_path = os.path.join(path, 'toy_train.bmoes')
+    dev_path = os.path.join(path, 'toy_dev.bmoes')
+    test_path = os.path.join(path, 'toy_test.bmoes')
 
     loader = ConllLoader(['chars', 'target'])
     train_bundle = loader.load(train_path)
@@ -343,11 +343,11 @@ def load_msra_ner_without_dev(path, char_embedding_path=None, bigram_embedding_p
     from fastNLP.io.loader import ConllLoader
     from utils import get_bigrams
     if train_clip:
-        train_path = os.path.join(path, 'msra_train_bmes.txt_clip2')
-        test_path = os.path.join(path, 'msra_test_bmes.txt_clip2')
+        train_path = os.path.join(path, 'train.char.clip256.bmoes')
+        test_path = os.path.join(path, 'test.char.clip256.bmoes')
     else:
-        train_path = os.path.join(path, 'msra_train_bmes.txt')
-        test_path = os.path.join(path, 'msra_test_bmes.txt')
+        train_path = os.path.join(path, 'train.char.bmoes')
+        test_path = os.path.join(path, 'test.char.bmoes')
     loader = ConllLoader(['chars', 'target'])
     train_bundle = loader.load(train_path)
     test_bundle = loader.load(test_path)
@@ -481,9 +481,9 @@ def load_weibo_ner(path, unigram_embedding_path=None, bigram_embedding_path=None
 
     # print(datasets['train'][:5])
 
-    train_path = os.path.join(path, 'train.char.bmes')
-    dev_path = os.path.join(path, 'dev.char.bmes')
-    test_path = os.path.join(path, 'test.char.bmes')
+    train_path = os.path.join(path, 'train.char.bmoes')
+    dev_path = os.path.join(path, 'dev.char.bmoes')
+    test_path = os.path.join(path, 'test.char.bmoes')
 
     paths = {}
     paths['train'] = train_path

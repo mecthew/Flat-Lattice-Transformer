@@ -7,22 +7,25 @@ ATTR_NULL_TAG = 'null'
 def input_with_span_attr(datasets, vocabs):
     datasets['train'].apply_field(lambda x: list(map(lambda y: y[0], x)), field_name='target',
                                   new_field_name='span_label')
-    datasets['dev'].apply_field(lambda x: list(map(lambda y: y[0], x)), field_name='target',
-                                new_field_name='span_label')
+    if 'dev' in datasets:
+        datasets['dev'].apply_field(lambda x: list(map(lambda y: y[0], x)), field_name='target',
+                                    new_field_name='span_label')
     datasets['test'].apply_field(lambda x: list(map(lambda y: y[0], x)), field_name='target',
                                  new_field_name='span_label')
 
     datasets['train'].apply_field(lambda x: list(map(lambda y: y[2:] if y[0] in ['S', 'B'] else ATTR_NULL_TAG, x)),
                                   field_name='target', new_field_name='attr_start_label')
-    datasets['dev'].apply_field(lambda x: list(map(lambda y: y[2:] if y[0] in ['S', 'B'] else ATTR_NULL_TAG, x)),
-                                field_name='target', new_field_name='attr_start_label')
+    if 'dev' in datasets:
+        datasets['dev'].apply_field(lambda x: list(map(lambda y: y[2:] if y[0] in ['S', 'B'] else ATTR_NULL_TAG, x)),
+                                    field_name='target', new_field_name='attr_start_label')
     datasets['test'].apply_field(lambda x: list(map(lambda y: y[2:] if y[0] in ['S', 'B'] else ATTR_NULL_TAG, x)),
                                  field_name='target', new_field_name='attr_start_label')
 
     datasets['train'].apply_field(lambda x: list(map(lambda y: y[2:] if y[0] in ['S', 'E'] else ATTR_NULL_TAG, x)),
                                   field_name='target', new_field_name='attr_end_label')
-    datasets['dev'].apply_field(lambda x: list(map(lambda y: y[2:] if y[0] in ['S', 'E'] else ATTR_NULL_TAG, x)),
-                                field_name='target', new_field_name='attr_end_label')
+    if 'dev' in datasets:
+        datasets['dev'].apply_field(lambda x: list(map(lambda y: y[2:] if y[0] in ['S', 'E'] else ATTR_NULL_TAG, x)),
+                                    field_name='target', new_field_name='attr_end_label')
     datasets['test'].apply_field(lambda x: list(map(lambda y: y[2:] if y[0] in ['S', 'E'] else ATTR_NULL_TAG, x)),
                                  field_name='target', new_field_name='attr_end_label')
 
