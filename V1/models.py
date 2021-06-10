@@ -408,18 +408,18 @@ class Lattice_Transformer_SeqLabel(nn.Module):
         self.new_tag_scheme = new_tag_scheme
 
         if self.new_tag_scheme:
-            self.crf = get_crf_zero_init(self.span_label_size)
+            self.crf = get_crf_zero_init(self.span_label_size, include_start_end_trans=True)
             weight = torch.FloatTensor([1.0 if vocabs['attr_label'].to_word(i) != ATTR_NULL_TAG else 0.1
                                         for i in range(self.attr_label_size)])
-            self.attr_criterion = nn.CrossEntropyLoss(reduction='none', weight=weight)
+            self.attr_criterion = nn.CrossEntropyLoss(reduction='none')
             self.ple = PLE(hidden_size=hidden_size, span_label_size=self.span_label_size,
-                           attr_label_size=self.attr_label_size, dropout_rate=0.3, experts_layers=2, experts_num=1,
+                           attr_label_size=self.attr_label_size, dropout_rate=0.1, experts_layers=2, experts_num=1,
                            ple_dropout=0.1, use_ple_lstm=use_ple_lstm)
             self.span_loss_alpha = span_loss_alpha
             self.ple_channel_num = ple_channel_num
             self.encoder_list = clones(self.encoder, self.ple_channel_num)
         else:
-            self.crf = get_crf_zero_init(self.label_size)
+            self.crf = get_crf_zero_init(self.label_size, include_start_end_trans=True)
             self.loss_func = nn.CrossEntropyLoss(ignore_index=-100)
 
     def forward(self, lattice, bigrams, seq_len, lex_num, pos_s, pos_e,
@@ -526,21 +526,22 @@ class Lattice_Transformer_SeqLabel(nn.Module):
                 encoded = encoded[:, :max_seq_len, :]
                 encodeds.append(encoded)
             if self.ple_channel_num == 1:
-                encodeds = encodeds * 3
-            # elif self.ple_channel_num == 2:
-                # encodeds = [encodeds[0]] + encodeds  # 重复第一个
-            span_logits, attr_start_logits, attr_end_logits = self.ple(encodeds[0], encodeds[1], encodeds[2])
+                span_logits, attr_start_logits, attr_end_logits = self.ple(encodeds[0], encodeds[0], encodeds[0])
+            else:
+                span_logits, attr_start_logits, attr_end_logits = self.ple(encodeds[0], encodeds[1], encodeds[2])
             if self.training:
                 inputs_seq_len = mask.sum(dim=-1).float()
-                span_loss = self.crf(span_logits, span_label, mask)
+                span_loss = self.crf(span_logits, span_label, mask).mean(dim=0)
                 attr_start_loss = self.attr_criterion(attr_start_logits.permute(0, 2, 1), attr_start_label)  # B * S
-                attr_start_loss = torch.sum(attr_start_loss * mask.float(), dim=-1).float() / inputs_seq_len  # B
+                attr_start_loss = (torch.sum(attr_start_loss * mask.float(), dim=-1).float() / inputs_seq_len).mean()  # B
                 attr_end_loss = self.attr_criterion(attr_end_logits.permute(0, 2, 1), attr_end_label)  # B * S
-                attr_end_loss = torch.sum(attr_end_loss * mask.float(), dim=-1).float() / inputs_seq_len  # B
+                attr_end_loss = (torch.sum(attr_end_loss * mask.float(), dim=-1).float() / inputs_seq_len).mean()  # B
                 loss = (self.span_loss_alpha * span_loss + attr_start_loss + attr_end_loss) / 3
+                if torch.isnan(span_loss.mean()) or torch.abs(span_loss.mean()) > 50:
+                    print(f"Abnormal span_loss: {span_loss}")
                 return {"loss": loss}
             else:
-                span_pred, path = self.crf.viterbi_decode(span_logits, mask)
+                # span_pred, path = self.crf.viterbi_decode(span_logits, mask)
                 attr_start_pred = attr_start_logits.argmax(dim=-1)
                 attr_end_pred = attr_end_logits.argmax(dim=-1)
                 ner_pred = convert_attr_seq_to_ner_seq(attr_start_pred, attr_end_pred, self.vocabs, tagscheme='BMOES')

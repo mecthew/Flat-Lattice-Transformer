@@ -32,7 +32,7 @@ def input_with_span_attr(datasets, vocabs):
     span_label_vocab = Vocabulary()
     attr_label_vocab = Vocabulary()
     span_label_vocab.from_dataset(datasets['train'], field_name='span_label')
-    attr_label_vocab.from_dataset(datasets['train'], field_name='attr_start_label')
+    attr_label_vocab.from_dataset(datasets['train'], field_name=['attr_start_label', 'attr_end_label'])
     vocabs['span_label'] = span_label_vocab
     vocabs['attr_label'] = attr_label_vocab
     print(f"span label: {span_label_vocab.word2idx.keys()}")
@@ -71,7 +71,7 @@ def convert_attr_seq_to_ner_seq(attr_start_tensor, attr_end_tensor, vocabs, tags
     attr_end_pred_tag = attr_end_tensor.detach().cpu().numpy()
     pred_label = []
     pred_label_text = []
-    attr_neg_tags = [attr_label_vocab.to_index(w) for w in ['<pad>', '<unk>', ATTR_NULL_TAG]]
+    attr_neg_tags = [attr_label_vocab.to_index(w) for w in [ATTR_NULL_TAG]]
     for idx in range(batch_size):
         attr_start_seq, attr_end_seq = attr_start_pred_tag[idx], attr_end_pred_tag[idx]
         pairs = extract_kvpairs_by_start_end(attr_start_seq, attr_end_seq, attr_neg_tags)
@@ -95,8 +95,11 @@ def convert_attr_seq_to_ner_seq(attr_start_tensor, attr_end_tensor, vocabs, tags
             else:
                 raise ValueError('Unknown tagscheme: {}!'.format(tagscheme))
         try:
-            unknown_idx = label_vocab.to_index('O')  # 因为_tag是根据attr生成，可能不在label_alphabet里
+            unknown_idx = label_vocab.to_index('O')  # 因为_tag是根据attr生成，可能不在label_alphabet里，例如S-PER
             label_keys = list(label_vocab.word2idx.keys())
+            unk_tags = [_tag for _tag in ner_seqs if _tag not in label_keys]
+            if unk_tags:
+                print(unk_tags)
             pred_label.append(
                 [label_vocab.to_index(_tag) if _tag in label_keys else unknown_idx for _tag in ner_seqs])
         except:
@@ -105,3 +108,9 @@ def convert_attr_seq_to_ner_seq(attr_start_tensor, attr_end_tensor, vocabs, tags
         pred_label_text.append(ner_seqs)
     pred_variable = torch.tensor(pred_label, requires_grad=False).long().to(device)
     return pred_variable
+
+
+if __name__ == '__main__':
+    start_seq = ['A', 'B', '', '', '', '', 'C', '']
+    end_seq = ['A', '', '', 'B', '', '', '', 'C']
+    print(extract_kvpairs_by_start_end(start_seq, end_seq, neg_tag=['']))

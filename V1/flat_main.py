@@ -1,15 +1,8 @@
 import re
+import sys
 
 import fitlog
 
-use_fitlog = True
-if not use_fitlog:
-    fitlog.debug()
-fitlog.set_log_dir('logs')
-load_dataset_seed = 100
-fitlog.add_hyper(load_dataset_seed, 'load_dataset_seed')
-fitlog.set_rng_seed(load_dataset_seed)
-import sys
 
 sys.path.append('../')
 from load_data import *
@@ -56,7 +49,6 @@ import datetime
 #     log.write(warnings.formatwarning(message, category, filename, lineno, line))
 # warnings.showwarning = warn_with_traceback
 
-set_seed(100)
 parser = argparse.ArgumentParser()
 # performance inrelevant
 parser.add_argument('--update_every', type=int, default=1)
@@ -168,13 +160,28 @@ parser.add_argument('--dataset', default='policy', help='weibo|resume|ontonotes|
 parser.add_argument('--new_tag_scheme', type=int, default=1)
 parser.add_argument('--refresh_data', action='store_true')
 parser.add_argument('--loadmodel_path', default='')
-parser.add_argument('--span_loass_alpha', default=0.1, type=float)
+parser.add_argument('--span_loass_alpha', default=1.0, type=float)
 parser.add_argument('--ple_channel_num', default=1, type=int, choices=[1, 3])
-parser.add_argument('--use_ple_lstm', action='store_true')
+parser.add_argument('--use_ple_lstm', default=0, type=int)
+parser.add_argument('--global_seed', default=100, type=int)
 # parser.add_argument('--debug',default=1)
 
 args = parser.parse_args()
-# log_dir = f'../output/logs/{args.dataset}/bert{args.use_bert}_tagscheme{args.new_tag_scheme}_ple'
+if args.test_batch == -1:
+    args.test_batch = args.batch // 2
+else:
+    args.test_batch = args.batch
+
+use_fitlog = False
+if not use_fitlog:
+    fitlog.debug()
+fitlog.set_log_dir('logs')
+load_dataset_seed = args.global_seed
+print(f"load_dataset_seed: {load_dataset_seed}")
+fitlog.add_hyper(load_dataset_seed, 'load_dataset_seed')
+fitlog.set_rng_seed(load_dataset_seed)
+set_seed(args.seed)
+# log_dir = f'../output/logs/{args.dataset}/bert{args.use_bert}_scheme{args.new_tag_scheme}_ple'
 # os.makedirs(log_dir, exist_ok=True)
 # file_logger = get_logger(sys.argv, log_dir + '/{}.log'.format(datetime.datetime.now().strftime('%y-%m-%d-%H-%M-%S')))
 # file_logger.info('Arguments:')
@@ -198,15 +205,12 @@ if args.lattice and args.use_rel_pos:
 fitlog.commit(__file__, fit_msg='绝对位置用新的了')
 fitlog.set_log_dir('logs')
 now_time = get_peking_time()
-logger.add_file(f'log/{args.dataset}/bert{args.use_bert}_tagscheme{args.new_tag_scheme}_ple{args.ple_channel_num}_plstm{int(args.use_ple_lstm)}/{now_time}.log', level='info')
+logger.add_file(f'../output/logs/{args.dataset}_{args.status}/bert{args.use_bert}_scheme{args.new_tag_scheme}'
+                f'_ple{args.ple_channel_num}_plstm{int(args.use_ple_lstm)}/{now_time}.log', level='info')
 logger.info('Arguments')
 for arg in vars(args):
     logger.info("{}: {}".format(arg, getattr(args, arg)))
 
-if args.test_batch == -1:
-    args.test_batch = args.batch // 2
-else:
-    args.test_batch = args.batch
 fitlog.add_hyper(now_time, 'time')
 if args.debug:
     # args.dataset = 'toy'
@@ -249,7 +253,7 @@ for k, v in args.__dict__.items():
 # exit(0)
 
 raw_dataset_cache_name = os.path.join('cache', args.dataset
-                                      + '_newtagscheme{}'.format(args.new_tag_scheme)
+                                      + '_scheme{}'.format(args.new_tag_scheme)
                                       + '_trainClip:{}'.format(args.train_clip)
                                       + 'bgminfreq_{}'.format(args.bigram_min_freq)
                                       + 'char_min_freq_{}'.format(args.char_min_freq)
@@ -336,7 +340,7 @@ elif args.dataset == 'resume':
     pass
 
 elif args.dataset == 'ontonotes':
-    args.update_every = 2
+    # args.update_every = 2
     pass
 
 elif args.dataset == 'msra':
@@ -355,7 +359,7 @@ w_list = load_yangjie_rich_pretrain_word_list(yangjie_rich_pretrain_word_path,
 cache_name = os.path.join('cache', (args.dataset + '_lattice' + '_only_train:{}' +
                                     '_trainClip:{}' + '_norm_num:{}'
                                     + 'char_min_freq{}' + 'bigram_min_freq{}' + 'word_min_freq{}' + 'only_train_min_freq{}'
-                                    + 'number_norm{}' + 'lexicon_{}' + 'load_dataset_seed_{}' + '_newtagscheme{}')
+                                    + 'number_norm{}' + 'lexicon_{}' + 'load_dataset_seed_{}' + '_scheme{}')
                           .format(args.only_lexicon_in_train,
                                   args.train_clip, args.number_normalized, args.char_min_freq,
                                   args.bigram_min_freq, args.word_min_freq, args.only_train_min_freq,
@@ -369,8 +373,7 @@ datasets, vocabs, embeddings = equip_chinese_ner_with_lexicon(datasets, vocabs, 
                                                               lattice_min_freq=args.lattice_min_freq,
                                                               only_train_min_freq=args.only_train_min_freq)
 
-print('train:{}'.format(len(datasets['train'])))
-logger.info('train:{}'.format(len(datasets['train'])))
+logger.info('train: {}'.format(len(datasets['train'])))
 avg_seq_len = 0
 avg_lex_num = 0
 avg_seq_lex = 0
@@ -399,13 +402,13 @@ for k, v in datasets.items():
         if k == 'train':
             train_seq_lex.append(v[i]['lex_num'] + v[i]['seq_len'])
             train_seq.append(v[i]['seq_len'])
-            if v[i]['seq_len'] > 200:
-                print('train里这个句子char长度已经超了200了')
-                print(''.join(list(map(lambda x: vocabs['char'].to_word(x), v[i]['chars']))))
-            else:
-                if v[i]['seq_len'] + v[i]['lex_num'] > 400:
-                    print('train里这个句子char长度没超200，但是总长度超了400')
-                    print(''.join(list(map(lambda x: vocabs['char'].to_word(x), v[i]['chars']))))
+            # if v[i]['seq_len'] > 200:
+            #     print('train里这个句子char长度已经超了200了')
+            #     print(''.join(list(map(lambda x: vocabs['char'].to_word(x), v[i]['chars']))))
+            # else:
+            #     if v[i]['seq_len'] + v[i]['lex_num'] > 400:
+            #         print('train里这个句子char长度没超200，但是总长度超了400')
+            #         print(''.join(list(map(lambda x: vocabs['char'].to_word(x), v[i]['chars']))))
         if k == 'dev':
             dev_seq_lex.append(v[i]['lex_num'] + v[i]['seq_len'])
             dev_seq.append(v[i]['seq_len'])
@@ -457,20 +460,20 @@ for k, v in datasets.items():
 
 # max_seq_len = max(max(datasets['train']['seq_len']),max(datasets['dev']['seq_len']),max(datasets['test']['seq_len']))
 max_seq_len = max(*map(lambda x: max(x['seq_len']), datasets.values()))
-
-show_index = 3
-print('raw_chars:{}'.format(list(datasets['train'][show_index]['raw_chars'])))
-print('lexicons:{}'.format(list(datasets['train'][show_index]['lexicons'])))
-print('lattice:{}'.format(list(datasets['train'][show_index]['lattice'])))
-print('raw_lattice:{}'.format(list(map(lambda x: vocabs['lattice'].to_word(x),
-                                       list(datasets['train'][show_index]['lattice'])))))
-print('lex_s:{}'.format(list(datasets['train'][show_index]['lex_s'])))
-print('lex_e:{}'.format(list(datasets['train'][show_index]['lex_e'])))
-print('pos_s:{}'.format(list(datasets['train'][show_index]['pos_s'])))
-print('pos_e:{}'.format(list(datasets['train'][show_index]['pos_e'])))
-print('span_label:{}'.format(list(datasets['train'][show_index]['span_label'])))
-print('attr_start_label:{}'.format(list(datasets['train'][show_index]['attr_start_label'])))
-print('attr_end_label:{}'.format(list(datasets['train'][show_index]['attr_end_label'])))
+logger.info(f"Max seq len: {max_seq_len}")
+# show_index = 3
+# print('raw_chars:{}'.format(list(datasets['train'][show_index]['raw_chars'])))
+# print('lexicons:{}'.format(list(datasets['train'][show_index]['lexicons'])))
+# print('lattice:{}'.format(list(datasets['train'][show_index]['lattice'])))
+# print('raw_lattice:{}'.format(list(map(lambda x: vocabs['lattice'].to_word(x),
+#                                        list(datasets['train'][show_index]['lattice'])))))
+# print('lex_s:{}'.format(list(datasets['train'][show_index]['lex_s'])))
+# print('lex_e:{}'.format(list(datasets['train'][show_index]['lex_e'])))
+# print('pos_s:{}'.format(list(datasets['train'][show_index]['pos_s'])))
+# print('pos_e:{}'.format(list(datasets['train'][show_index]['pos_e'])))
+# print('span_label:{}'.format(list(datasets['train'][show_index]['span_label'])))
+# print('attr_start_label:{}'.format(list(datasets['train'][show_index]['attr_start_label'])))
+# print('attr_end_label:{}'.format(list(datasets['train'][show_index]['attr_end_label'])))
 # exit(1208)
 
 for k, v in datasets.items():
@@ -606,8 +609,8 @@ elif args.model == 'lstm':
                                debug=args.debug)
 
 for n, p in model.named_parameters():
-    print('{}:{}'.format(n, p.size()))
-    logger.info('{}:{}'.format(n, p.size()))
+    if 'bert_embedding' not in n:
+        logger.info('{}:{}'.format(n, p.size()))
 
 # exit(1208)
 
@@ -776,10 +779,21 @@ class Unfreeze_Callback(Callback):
             self.bert_embedding.requires_grad = True
 
 
+class LrMonitor(Callback):
+    def __init__(self, model_optimizer):
+        super(LrMonitor, self).__init__()
+        self._optimizer = model_optimizer
+
+    def on_epoch_end(self):
+        for ith, param in enumerate(self._optimizer.param_groups):
+            logger.info(f"{ith} lr: {param['lr']}")
+
+
 callbacks = [
     evaluate_callback,
     lrschedule_callback,
-    clip_callback
+    clip_callback,
+    LrMonitor(model_optimizer=optimizer)
 ]
 if args.use_bert:
     if args.fix_bert_epoch != 0:
@@ -787,8 +801,8 @@ if args.use_bert:
     else:
         bert_embedding.requires_grad = True
 callbacks.append(EarlyStopCallback(args.early_stop))
-if args.warmup > 0 and args.model == 'transformer':
-    callbacks.append(WarmupCallback(warmup=args.warmup))
+# if args.warmup > 0 and args.model == 'transformer':
+#     callbacks.append(WarmupCallback(warmup=args.warmup))
 
 
 class record_best_test_callback(Callback):
@@ -829,8 +843,8 @@ def get_predictions(pred_model, input_data, batch_size, num_workers=4):
     for pred_seq, gold_seq, word_seq, seq_len in zip(pred_seqs, gold_seqs, texts, seq_lens):
         pred_seq = pred_seq[:seq_len]
         gold_seq = gold_seq[:seq_len]
-        case_result.append((''.join(word_seq), extract_kvpairs_in_bio(gold_seq, word_seq),
-                           extract_kvpairs_in_bio(pred_seq, word_seq)))
+        case_result.append((''.join(word_seq), extract_kvpairs_in_bmoes(gold_seq, word_seq),
+                           extract_kvpairs_in_bmoes(pred_seq, word_seq)))
 
     # output for case study
     os.makedirs(f'../output/case_study/{args.dataset}', exist_ok=True)
@@ -845,6 +859,7 @@ if args.status == 'train':
         dev_data = datasets['test']
     else:
         dev_data = datasets['dev']
+    os.makedirs("../output/ckpt", exist_ok=True)
     trainer = Trainer(datasets['train'], model, optimizer, loss, args.batch,
                       n_epochs=args.epoch,
                       dev_data=dev_data,
@@ -854,31 +869,14 @@ if args.status == 'train':
                       update_every=args.update_every,
                       save_path=ckpt_path)
 
-    os.makedirs("../output/ckpt", exist_ok=True)
     result = trainer.train()
     # dev_f = result['best_eval']['SpanFPreRecMetric']['f']
     # file_logger.info(f"Dev resule F1: {dev_f}")
     # torch.save(model.state_dict(), ckpt_path.replace('.ckpt', '_f{}.ckpt'.format(dev_f)))
-# elif args.status == 'test':
 
-if args.dataset != 'msra':
-    if args.loadmodel_path:
-        ckpt_path = args.loadmodel_path
-    else:
-        # prefix = ckpt_path.rsplit('/', maxsplit=1)[-1].split('.')[0]
-        # print(f"Be attention to prefix {prefix} !")
-        # fscores = []
-        # for file in os.listdir(ckpt_path.rsplit('/', maxsplit=1)[0]):
-        #     if file.endswith('.ckpt') and re.match(prefix + '_f(\d+\.?\d+)', file):
-        #         fscores.append(float(re.findall(prefix + '_f(\d+\.?\d+)', file)[0]))
-        # max_score = max(fscores)
-        # ckpt_path = ckpt_path.replace('.ckpt', f"_f{max_score}.ckpt")
-        last_ckpt = os.listdir(ckpt_path)[-1]
-        ckpt_path = os.path.join(ckpt_path, last_ckpt)
-        # print(last_ckpt)
-
-        print(f"Find default best dev ckpt: {ckpt_path}")
-        logger.info(f"Find default best dev ckpt: {ckpt_path}")
+if args.loadmodel_path:
+    ckpt_path = args.loadmodel_path
+    logger.info(f"Find default best dev ckpt: {ckpt_path}")
 
     # model.load_state_dict(torch.load(ckpt_path))
     del model
@@ -890,7 +888,45 @@ if args.dataset != 'msra':
                     batch_size=args.test_batch)
     tester.test()
     get_predictions(model, input_data=datasets['test'], batch_size=args.test_batch)
-    label2id = vocabs['label']
+elif args.status == 'test':
+    # prefix = ckpt_path.rsplit('/', maxsplit=1)[-1].split('.')[0]
+    # print(f"Be attention to prefix {prefix} !")
+    # fscores = []
+    # for file in os.listdir(ckpt_path.rsplit('/', maxsplit=1)[0]):
+    #     if file.endswith('.ckpt') and re.match(prefix + '_f(\d+\.?\d+)', file):
+    #         fscores.append(float(re.findall(prefix + '_f(\d+\.?\d+)', file)[0]))
+    # max_score = max(fscores)
+    # ckpt_path = ckpt_path.replace('.ckpt', f"_f{max_score}.ckpt")
+    # last_ckpt = sorted(os.listdir(ckpt_path))[-1]
+    # ckpt_path = os.path.join(ckpt_path, last_ckpt)
+    for file in os.listdir(ckpt_path):
+        ckpt_file = os.path.join(ckpt_path, file)
+        logger.info(f"Find default best dev ckpt: {ckpt_file}")
+
+        del model
+        torch.cuda.empty_cache()
+        model = torch.load(ckpt_file)
+        tester = Tester(data=datasets['test'], model=model,
+                        metrics=metrics,
+                        device=device,
+                        batch_size=args.test_batch)
+        tester.test()
+        get_predictions(model, input_data=datasets['test'], batch_size=args.test_batch)
+else:
+    last_ckpt = sorted(os.listdir(ckpt_path))[-1]
+    ckpt_path = os.path.join(ckpt_path, last_ckpt)
+    logger.info(f"Find default best dev ckpt: {ckpt_path}")
+
+    del model
+    torch.cuda.empty_cache()
+    model = torch.load(ckpt_path)
+    tester = Tester(data=datasets['test'], model=model,
+                    metrics=metrics,
+                    device=device,
+                    batch_size=args.test_batch)
+    tester.test()
+    # get_predictions(model, input_data=datasets['test'], batch_size=args.test_batch)
+
 
 
 
